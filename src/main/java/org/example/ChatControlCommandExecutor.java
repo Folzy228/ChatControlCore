@@ -149,7 +149,6 @@ public class ChatControlCommandExecutor implements CommandExecutor {
                 reader.close();
 
                 String currentVersion = plugin.getDescription().getVersion();
-                // Обновляем сообщение на основном потоке
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     if (!latestVersion.equals(currentVersion)) {
                         sender.sendMessage(ChatColor.GREEN + "[ChatControlCore] : Доступна новая версия плагина! Текущая версия: " + currentVersion + ", последняя версия: " + latestVersion);
