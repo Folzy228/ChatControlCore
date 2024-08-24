@@ -1,0 +1,11 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="ChatControlCore_v1.3_BETA:jar">
+    <output-path>$USER_HOME$/Desktop</output-path>
+    <root id="archive" name="ChatControlCore_v1.3_BETA.jar">
+      <element id="module-output" name="ChatControlCore.main" />
+      <element id="file-copy" path="$PROJECT_DIR$/src/main/resources/config.yml" />
+      <element id="file-copy" path="$PROJECT_DIR$/src/main/resources/plugin.yml" />
+      <element id="file-copy" path="$PROJECT_DIR$/src/main/resources/players.yml" />
+    </root>
+  </artifact>
+</component>
