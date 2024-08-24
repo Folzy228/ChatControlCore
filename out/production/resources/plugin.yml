@@ -5,3 +5,6 @@ commands:
   ccc: {}
 permissions:
   chatcontrolcore.command.reload: {}
+  chatcontrolcore.command.clear: {}
+  chatcontrolcore.command.whitelist: {}
+  chatcontrolcore.command.update: {}
