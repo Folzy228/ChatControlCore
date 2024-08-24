@@ -1,7 +1,0 @@
-name: ChatControlCore
-version: '1.3-BETA'
-main: org.example.ChatControlCore
-commands:
-  ccc: {}
-permissions:
-  chatcontrolcore.command.reload: {}
