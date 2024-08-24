@@ -26,25 +26,20 @@ public class ChatControlCore extends JavaPlugin implements Listener {
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        copyResource("players.yml"); // Копирование players.yml из JAR
+        copyResource("players.yml");
 
-        // Инициализация и регистрация слушателей и команд
         commandExecutor = new ChatControlCommandExecutor(this);
         eventListener = new ChatControlEventListener(this);
         getCommand("ccc").setExecutor(commandExecutor);
         getServer().getPluginManager().registerEvents(eventListener, this);
-        getServer().getPluginManager().registerEvents(this, this); // Регистрируем этот класс как слушатель событий
-
-        // Перезагрузка конфигурации после инициализации eventListener
+        getServer().getPluginManager().registerEvents(this, this);
         reloadConfig();
-
-        // Проверка версии плагина в конце запуска сервера
         checkForUpdates();
     }
 
     @Override
     public void reloadConfig() {
-        super.reloadConfig(); // Перезагрузка конфигурации
+        super.reloadConfig();
         if (eventListener != null) {
             eventListener.reloadConfig();
         } else {
@@ -84,8 +79,7 @@ public class ChatControlCore extends JavaPlugin implements Listener {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
                     latestVersion = reader.readLine().trim();
                     reader.close();
-                    String currentVersion = getDescription().getVersion(); // Получение текущей версии из plugin.yml
-                    // Обновляем сообщения на основном потоке
+                    String currentVersion = getDescription().getVersion();
                     getServer().getScheduler().runTask(ChatControlCore.this, () -> {
                         if (!latestVersion.equals(currentVersion)) {
                             getLogger().info("A new version of the plugin is available! Current version: " + currentVersion + ", latest version: " + latestVersion);
@@ -104,7 +98,6 @@ public class ChatControlCore extends JavaPlugin implements Listener {
         if (player.isOp() && latestVersion != null) {
             String currentVersion = getDescription().getVersion();
             if (!latestVersion.equals(currentVersion)) {
-                // Отложенная отправка сообщения через 5 секунд
                 new BukkitRunnable() {
                     @Override
                     public void run() {
