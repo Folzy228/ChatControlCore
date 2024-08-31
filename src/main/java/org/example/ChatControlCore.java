@@ -1,9 +1,13 @@
 package org.example;
 
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 
@@ -15,26 +19,72 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.*;
 import java.util.logging.Level;
 
 public class ChatControlCore extends JavaPlugin implements Listener {
+    private final Map<String, PrivateChat> privateChats = new HashMap<>();
+    private final Map<UUID, PrivateChatRequest> chatRequests = new HashMap<>();
     private ChatControlCommandExecutor commandExecutor;
     private ChatControlEventListener eventListener;
     static final String VERSION_FILE_URL = "https://raw.githubusercontent.com/Folzy228/ChatControlCore/main/latest_version_ccc.txt";
     private String latestVersion;
+    private List<String> chatHistory = new ArrayList<>();
+    private Map<UUID, Long> mutedPlayers = new HashMap<>();
+    private GroupManager groupManager;
+    private AutoMessage autoMessage;
+    private AntiAFK antiAFK;
+
+    public void addChatMessage(String message) {
+        chatHistory.add(message);
+    }
+
+    public ChatControlCommandExecutor getCommandExecutor() {
+        return commandExecutor;
+    }
+
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
         copyResource("players.yml");
-
-        commandExecutor = new ChatControlCommandExecutor(this);
-        eventListener = new ChatControlEventListener(this);
-        getCommand("ccc").setExecutor(commandExecutor);
-        getServer().getPluginManager().registerEvents(eventListener, this);
+        copyResource("groups.yml");
+        copyResource("group_players.yml");
         getServer().getPluginManager().registerEvents(this, this);
+        groupManager = new GroupManager(this);
+        this.groupManager = new GroupManager(this);
+        autoMessage = new AutoMessage(this);
+        antiAFK = new AntiAFK(this);
+        getServer().getPluginManager().registerEvents(antiAFK, this);
+        getServer().getPluginManager().registerEvents(this, this);
+
+        groupManager = new GroupManager(this);
+        commandExecutor = new ChatControlCommandExecutor(this, groupManager);
+        getCommand("ccc").setExecutor(commandExecutor);
+
+        eventListener = new ChatControlEventListener(this, commandExecutor);
+        getServer().getPluginManager().registerEvents(eventListener, this);
+
         reloadConfig();
+
         checkForUpdates();
+    }
+
+    public Map<String, PrivateChat> getPrivateChats() {
+        return privateChats;
+    }
+
+    public Map<UUID, PrivateChatRequest> getChatRequests() {
+        return chatRequests;
+    }
+
+    public Map<UUID, Long> getMutedPlayers() {
+        return mutedPlayers;
+    }
+
+    public boolean isPlayerMuted(UUID playerId) {
+        Long muteEndTime = mutedPlayers.get(playerId);
+        return muteEndTime != null && System.currentTimeMillis() < muteEndTime;
     }
 
     @Override
@@ -45,6 +95,34 @@ public class ChatControlCore extends JavaPlugin implements Listener {
         } else {
             getLogger().warning("EventListener не инициализирован.");
         }
+        if (groupManager != null) {
+            groupManager.reloadConfig();
+            for (Player player : getServer().getOnlinePlayers()) {
+                groupManager.removePermissions(player);
+                groupManager.loadPlayerData(player);
+            }
+        } else {
+            getLogger().warning("GroupManager не инициализирован.");
+        }
+        reloadPlayers();
+    }
+
+    private void reloadPlayers() {
+        File playersFile = new File(getDataFolder(), "players.yml");
+        if (!playersFile.exists()) {
+            saveResource("players.yml", false);
+        }
+        FileConfiguration playersConfig = YamlConfiguration.loadConfiguration(playersFile);
+        if (antiAFK != null) {
+            antiAFK.updateWhitelist(playersConfig.getStringList("Players"));
+        } else {
+            getLogger().warning("AntiAFK не инициализирован.");
+        }
+    }
+
+
+    public GroupManager getGroupManager() {
+        return groupManager;
     }
 
     private void copyResource(String resourceName) {
@@ -95,6 +173,10 @@ public class ChatControlCore extends JavaPlugin implements Listener {
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
+        groupManager.loadPlayerData(player);
+        if (!groupManager.hasPlayerGroup(player)) {
+            groupManager.addDefaultGroupToPlayer(player);
+        }
         if (player.isOp() && latestVersion != null) {
             String currentVersion = getDescription().getVersion();
             if (!latestVersion.equals(currentVersion)) {
@@ -104,8 +186,18 @@ public class ChatControlCore extends JavaPlugin implements Listener {
                         String message = "Доступна новая версия плагина! Текущая версия: " + currentVersion + ", последняя версия: " + latestVersion;
                         player.sendMessage(message);
                     }
-                }.runTaskLater(ChatControlCore.this, 100L); // 100 тиков = 5 секунд (20 тиков в секунду)
+                }.runTaskLater(ChatControlCore.this, 100L);
             }
         }
+    }
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        Player player = event.getPlayer();
+        groupManager.savePlayerData(player);
+    }
+
+    @EventHandler
+    public void onPlayerMove(PlayerMoveEvent event) {
+        antiAFK.updatePlayerMoveTime(event.getPlayer());
     }
 }
