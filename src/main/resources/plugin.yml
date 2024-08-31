@@ -1,5 +1,5 @@
 name: ChatControlCore
-version: '1.3-BETA'
+version: '1.4'
 main: org.example.ChatControlCore
 commands:
   ccc: {}
@@ -8,3 +8,7 @@ permissions:
   chatcontrolcore.command.clear: {}
   chatcontrolcore.command.whitelist: {}
   chatcontrolcore.command.update: {}
+  chatcontrolcore.command.mute: {}
+  chatcontrolcore.command.private: {}
+  chatcontrolcore.command.private.acceptdecline: {}
+  chatcontrolcore.command.user: {}
