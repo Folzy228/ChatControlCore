@@ -1,0 +1,17 @@
+Groups:
+  default:
+    Default: true
+    Prefix: "&f&l[&4&lTEST&f&l] &f&l"
+    Suffix: "&f&l"
+    Permissions:
+      - permission.node1
+      - permission.node2
+      - permission.node3
+  VIP:
+    Default: false
+    Prefix: "&f&l[&2&lVIP&f&l] &f&l"
+    Suffix: "&f&l"
+    Permissions:
+      - permission.node4
+      - permission.node5
+      - permission.node6
