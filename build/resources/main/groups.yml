@@ -1,0 +1,21 @@
+Groups:
+  default:
+    Default: true
+    Prefix: "&f&l[НОВИЧОК] "
+    Suffix: "&f&l"
+    Permissions: []
+
+  creator:
+    Default: false
+    Prefix: "&f&l[&e&lСОЗДАТЕЛЬ&f&l] "
+    Suffix: "&e&l"
+    Permissions:
+      - chatcontrolcore.command.reload
+      - chatcontrolcore.command.clear
+      - chatcontrolcore.command.whitelist
+      - chatcontrolcore.command.update
+      - chatcontrolcore.command.mute
+      - chatcontrolcore.command.unmute
+      - chatcontrolcore.command.private
+      - chatcontrolcore.command.user
+      - chatcontrolcore.command.private.acceptdecline
