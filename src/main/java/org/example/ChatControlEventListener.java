@@ -1,106 +1,184 @@
 package org.example;
 
-import net.luckperms.api.LuckPerms;
-import net.luckperms.api.model.user.User;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 
 import java.io.File;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ChatControlEventListener implements Listener {
-
     private final ChatControlCore plugin;
+    private final ChatControlCommandExecutor commandExecutor;
+    private final WorldMessages worldMessages;
     private FileConfiguration config;
     private FileConfiguration playersConfig;
     private final Map<UUID, LastMessageData> playerMessageData = new HashMap<>();
-    private final Set<String> exemptPlayers;
-    private final LuckPerms luckPermsApi;
+    private final Set<String> exemptPlayers = new HashSet<>();
+    private final Map<UUID, Long> mutedPlayers = new HashMap<>();
+    private final Map<UUID, Long> playerLogoutTimes = new HashMap<>();
 
-    public ChatControlEventListener(ChatControlCore plugin) {
+    public ChatControlEventListener(ChatControlCore plugin, ChatControlCommandExecutor commandExecutor) {
         this.plugin = plugin;
-        this.exemptPlayers = new HashSet<>();
-        this.luckPermsApi = Bukkit.getServicesManager().getRegistration(LuckPerms.class).getProvider();
+        this.commandExecutor = commandExecutor;
+        this.worldMessages = new WorldMessages(plugin);
         reloadConfig();
     }
 
     @EventHandler
     public void onPlayerChat(AsyncPlayerChatEvent event) {
+        Player player = event.getPlayer();
+        UUID playerId = player.getUniqueId();
         String message = event.getMessage();
-        UUID playerId = event.getPlayer().getUniqueId();
-        String playerName = event.getPlayer().getName();
-        long currentTime = System.currentTimeMillis();
 
-        if (exemptPlayers.contains(playerName)) {
+        if (plugin.isPlayerMuted(playerId)) {
+            long muteEndTime = plugin.getMutedPlayers().get(playerId);
+            long remainingTime = (muteEndTime - System.currentTimeMillis()) / 1000;
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.RED + "Вам запрещено писать в чат. Вы заблокированы в чате на " + remainingTime + " секунд!");
             return;
         }
 
-        User user = luckPermsApi.getUserManager().getUser(playerId);
-        if (user != null && user.getCachedData().getMetaData().getMetaValue("muted") != null) {
-            return;
-        }
+        if (message.startsWith(".")) {
+            String chatMessage = message.substring(1);
+            PrivateChat chat = plugin.getPrivateChats().values().stream()
+                    .filter(c -> c.getMembers().contains(playerId))
+                    .findFirst()
+                    .orElse(null);
 
-        boolean isSpamBlocked = config.getBoolean("off_spam", true);
-        if (isSpamBlocked) {
-            int maxMessages = config.getInt("chat.max_messages");
-            long timeWindowMillis = config.getInt("chat.time_window") * 1000;
-            long muteDurationMillis = config.getInt("chat.mute_duration") * 1000;
-            LastMessageData lastMessageData = playerMessageData.getOrDefault(playerId, new LastMessageData("", 0L, 0));
-            if (message.equals(lastMessageData.getMessage()) && (currentTime - lastMessageData.getLastTimestamp() <= timeWindowMillis)) {
-                int repeatCount = lastMessageData.getRepeatCount() + 1;
-                if (repeatCount >= maxMessages) {
-                    String muteCommand = "mute " + event.getPlayer().getName() + " " + (muteDurationMillis / 1000);
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), muteCommand);
-                    event.getPlayer().sendMessage(ChatColor.RED + "Вы были заблокированы в чате за повторение сообщения!");
-                    playerMessageData.put(playerId, new LastMessageData(message, currentTime, 0));
-                    return;
+            if (chat != null) {
+                event.setCancelled(true);
+
+                File playersFile = new File(plugin.getDataFolder(), "group_players.yml");
+                FileConfiguration playersConfig = YamlConfiguration.loadConfiguration(playersFile);
+                String groupName = playersConfig.getString("Players." + player.getName() + ".Group", "");
+
+                File groupsFile = new File(plugin.getDataFolder(), "groups.yml");
+                FileConfiguration groupsConfig = YamlConfiguration.loadConfiguration(groupsFile);
+                String prefix = groupsConfig.getString("Groups." + groupName + ".Prefix", "");
+
+                prefix = ChatColor.translateAlternateColorCodes('&', prefix);
+
+                for (UUID memberId : chat.getMembers()) {
+                    Player member = Bukkit.getPlayer(memberId);
+                    if (member != null) {
+                        member.sendMessage(ChatColor.LIGHT_PURPLE + "[Приватный чат] " + prefix + player.getName() + ": " + chatMessage);
+                    }
                 }
-                playerMessageData.put(playerId, new LastMessageData(message, currentTime, repeatCount));
             } else {
-                playerMessageData.put(playerId, new LastMessageData(message, currentTime, 1));
+                event.setCancelled(true);
+                player.sendMessage(ChatColor.RED + "Вы не состоите в приватном чате.");
+            }
+        } else {
+            handleSpam(event, message, playerId, System.currentTimeMillis());
+
+            if (!event.isCancelled()) {
+                String groupName = plugin.getGroupManager().getPlayerGroup(player);
+                String prefix = plugin.getGroupManager().getPrefix(groupName);
+                String suffix = plugin.getGroupManager().getSuffix(groupName);
+                message = handleUrlBlocking(event, message);
+                message = handleTextReplacement(event, message, groupName);
+                worldMessages.handleMessageVisibility(event, message, player, prefix, suffix);
+            }
+        }
+    }
+
+        @EventHandler
+        public void onPlayerJoin(PlayerJoinEvent event) {
+            Player player = event.getPlayer();
+            UUID playerId = player.getUniqueId();
+            if (playerLogoutTimes.containsKey(playerId)) {
+                long remainingTime = playerLogoutTimes.get(playerId);
+                long newMuteEndTime = System.currentTimeMillis() + remainingTime;
+                mutedPlayers.put(playerId, newMuteEndTime);
+                playerLogoutTimes.remove(playerId);
             }
         }
 
-        boolean isUrlBlocked = config.getBoolean("off_chat_url", true);
-        if (isUrlBlocked) {
-            String linkRegex = "http[s]?://\\S+";
-            Pattern pattern = Pattern.compile(linkRegex);
-            Matcher matcher = pattern.matcher(message);
-            if (matcher.find()) {
-                String replacementText = ChatColor.translateAlternateColorCodes('&', config.getString("url_change_text", "&4&lзапрещено"));
-                event.setMessage(replacementText);
-                return;
-            }
+    private void handleSpam(AsyncPlayerChatEvent event, String message, UUID playerId, long currentTime) {
+        Player player = event.getPlayer();
+        if (exemptPlayers.contains(player.getName())) {
+            return;
         }
 
-        String groupName = user != null ? user.getPrimaryGroup() : "default";
-        String colorCode = config.getString("Code." + groupName);
-        String colorAfterReplacement = colorCode != null ? ChatColor.translateAlternateColorCodes('&', colorCode) : "";
-        for (String key : config.getConfigurationSection("Test").getKeys(false)) {
-            String replaceKey = "Test." + key;
+        boolean isSpamProtectionEnabled = config.getBoolean("chat.off_spam", true);
+        if (!isSpamProtectionEnabled) {
+            return;
+        }
+
+        int spamTime = config.getInt("chat.spam_time", 5) * 1000;
+
+        if (commandExecutor.isPlayerMuted(playerId)) {
+            event.setCancelled(true);
+            return;
+        }
+
+        LastMessageData lastMessageData = playerMessageData.get(playerId);
+        if (lastMessageData != null && currentTime - lastMessageData.getLastTimestamp() < spamTime) {
+            long remainingTime = (lastMessageData.getLastTimestamp() + spamTime - currentTime) / 1000;
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.RED + "Вы можете отправлять сообщения только раз в " + (spamTime / 1000) + " секунд. Осталось: " + remainingTime + " секунд.");
+            return;
+        }
+        playerMessageData.put(playerId, new LastMessageData(message, currentTime, 1));
+    }
+
+        private String handleUrlBlocking(AsyncPlayerChatEvent event, String message) {
+            Player player = event.getPlayer();
+            if (exemptPlayers.contains(player.getName())) {
+                return message;
+            }
+
+            boolean isUrlBlocked = config.getBoolean("chat.off_chat_url", true);
+            if (isUrlBlocked) {
+                String linkRegex = "http[s]?://\\S+";
+                Pattern pattern = Pattern.compile(linkRegex);
+                Matcher matcher = pattern.matcher(message);
+                if (matcher.find()) {
+                    String replacementText = ChatColor.translateAlternateColorCodes('&', config.getString("chat.url_change_text", "&4&lзапрещено"));
+                    message = replacementText;
+                }
+            }
+            return message;
+        }
+
+    private String handleTextReplacement(AsyncPlayerChatEvent event, String message, String groupName) {
+        Player player = event.getPlayer();
+        if (exemptPlayers.contains(player.getName())) {
+            return message;
+        }
+        boolean isForbiddenWordsEnabled = config.getBoolean("chat.forbidden_words", true);
+        if (!isForbiddenWordsEnabled) {
+            return message;
+        }
+
+        String colorCode = config.getString("Code." + groupName, "&f");
+        String colorAfterReplacement = ChatColor.translateAlternateColorCodes('&', colorCode);
+        String suffix = plugin.getGroupManager().getSuffix(groupName);
+        String suffixColor = ChatColor.translateAlternateColorCodes('&', suffix);
+
+        for (String key : config.getConfigurationSection("replace_worlds").getKeys(false)) {
+            String replaceKey = "replace_worlds." + key;
             if (config.isList(replaceKey + ".Text")) {
                 List<String> textsToReplace = config.getStringList(replaceKey + ".Text");
-                String replacement = ChatColor.translateAlternateColorCodes('&', config.getString(replaceKey + ".Replace"));
+                String replacement = ChatColor.translateAlternateColorCodes('&', config.getString(replaceKey + ".Replace", "&f"));
                 for (String textToReplace : textsToReplace) {
                     String coloredTextToReplace = ChatColor.translateAlternateColorCodes('&', textToReplace);
-                    message = message.replaceAll("(?i)" + Pattern.quote(coloredTextToReplace), replacement + colorAfterReplacement);
+                    message = message.replaceAll("(?i)" + Pattern.quote(coloredTextToReplace), replacement + colorAfterReplacement + suffixColor);
                 }
             }
         }
-        event.setMessage(message);
+        return message;
     }
+
 
     public void reloadConfig() {
         File configFile = new File(plugin.getDataFolder(), "config.yml");
